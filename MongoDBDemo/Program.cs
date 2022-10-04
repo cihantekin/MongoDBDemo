@@ -1,5 +1,9 @@
-﻿using System;
+﻿using DnsClient.Internal;
+using MongoDB.Driver;
+using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 
 namespace MongoDBDemo
 {
@@ -53,6 +57,47 @@ namespace MongoDBDemo
             // db.DeleteRecord<PersonModel>("Users",record.Id);
 
             Console.ReadLine();
+        }
+
+        public void CreateExpireIndex(string? documentDuration, string? expireFormat)
+        {
+            IMongoDatabase db;
+             MongoClient client = new MongoClient();
+            db = client.GetDatabase("AddressBook");
+            IMongoCollection<PersonModel> collection = db.GetCollection<PersonModel>("personModel");
+
+            var isValidExpireFormat = TimeSpan.TryParseExact(documentDuration, expireFormat, CultureInfo.InvariantCulture, out TimeSpan expireAfter);
+
+            if (isValidExpireFormat)
+            {
+                const string _expireAt = "ExpireAt";
+                var expireIndex = new IndexKeysDefinitionBuilder<PersonModel>().Ascending(c => c.DateOfBirth);
+
+                var index = collection.Indexes.List().ToList()
+                    .Where(index => index["name"] == _expireAt)
+                    .Select(a => new
+                    {
+                        ExpireAfterSeconds = a.GetElement("expireAfterSeconds").Value.ToString()
+                    }).FirstOrDefault();
+
+                if (index != null)
+                {
+                    var registeredExpireAfter = TimeSpan.FromSeconds(Convert.ToInt64(index.ExpireAfterSeconds));
+                    if (registeredExpireAfter == expireAfter)
+                    {
+                        return;
+                    }
+                    collection.Indexes.DropOne(_expireAt);
+                    
+                }
+
+                collection.Indexes.CreateOne(new CreateIndexModel<PersonModel>(expireIndex, new CreateIndexOptions<PersonModel>
+                {
+                    Name = _expireAt,
+                    ExpireAfter = expireAfter,
+                    //PartialFilterExpression = Builders<collection>.Filter.Eq(x => x.IsTemporaryDocument, true)
+                }));
+            }
         }
     }
 }
